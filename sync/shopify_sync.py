@@ -47,12 +47,25 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
     ]
     sb.table("orders").upsert(order_rows, on_conflict="brand_id,order_id").execute()
 
-    # 3 — normalize order items
+    # Build variant → parent product_id map so items stored with variant_id
+    # (when product_id is null on the line item) can still hit product_costs.
+    raw_prods = (
+        sb.table("raw_shopify_products")
+        .select("product_id, payload")
+        .eq("brand_id", brand_id)
+        .execute()
+    ).data
+    variant_to_product: dict[str, str] = {}
+    for rp in raw_prods:
+        for v in rp["payload"].get("variants", []):
+            variant_to_product[str(v["id"])] = rp["product_id"]
+
+    # 3 — normalize order items (resolve variant IDs to parent product IDs)
     item_rows = [
         {
             "brand_id": brand_id,
             "order_id": rec.order_id,
-            "product_id": item["product_id"],
+            "product_id": variant_to_product.get(item["product_id"], item["product_id"]),
             "quantity": item["quantity"],
             "unit_price": item["unit_price"],
         }
