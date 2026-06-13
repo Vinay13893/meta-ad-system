@@ -37,6 +37,8 @@ def run_meta_sync(brand_id: str, creds: dict, account_id: str, target_date: date
         sb.table("raw_meta_insights").upsert(raw_upserts, on_conflict="brand_id,date,level,object_id").execute()
 
     # 2 — normalize and upsert
+    # Zip records with raw rows so we can use Meta's own ctr string
+    # (already a percentage, e.g. "2.4623") rather than computing it ourselves.
     records = [raw_to_record(r) for r in raw_rows]
     normalized = [
         {
@@ -56,11 +58,11 @@ def run_meta_sync(brand_id: str, creds: dict, account_id: str, target_date: date
             "frequency": rec.frequency,
             "purchases": rec.purchases,
             "revenue_rep": rec.revenue_rep,
-            "ctr": rec.link_clicks / rec.impressions if (rec.link_clicks is not None and rec.impressions) else None,
+            "ctr": float(raw["ctr"]) if raw.get("ctr") else None,
             "cpm": (rec.spend / rec.impressions * 1000) if rec.impressions else None,
             "cpa": (rec.spend / rec.purchases) if rec.purchases else None,
         }
-        for rec in records
+        for rec, raw in zip(records, raw_rows)
         if rec.ad_id
     ]
     if normalized:

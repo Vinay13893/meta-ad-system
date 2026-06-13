@@ -70,7 +70,7 @@ def compose_brief(
             name = (r.get("ad_name") or "—")[:32]
             lines.append(
                 f"  {name:<32}  {_inr(r.get('spend', 0))}  "
-                f"CTR {_pct(float(r.get('ctr') or 0) * 100)}  "
+                f"CTR {_pct(r.get('ctr') or 0)}  "
                 f"Freq {float(r.get('frequency') or 0):.1f}"
             )
 
