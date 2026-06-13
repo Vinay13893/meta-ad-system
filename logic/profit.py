@@ -113,6 +113,67 @@ def calc_daily_summary(
     }
 
 
+def calc_product_margins(
+    order_margins: list[dict],
+    order_items_by_order: dict[str, list[dict]],
+) -> list[dict]:
+    """
+    Aggregates per-product RTO-adjusted contribution margin across a day's orders.
+
+    Each product's share of an order's realized_value and contribution_margin is
+    prorated by (item_value / order_gross_value), where item_value = unit_price * qty.
+    This preserves the invariant: sum of product CMs == order CM.
+
+    order_margins:          list of dicts from calc_order_margin()
+    order_items_by_order:   {order_id: [{product_id, quantity, unit_price}]}
+
+    Returns list sorted by contribution_margin ascending (worst first).
+    """
+    margin_by_order = {m["order_id"]: m for m in order_margins}
+    accumulated: dict[str, dict] = {}
+
+    for order_id, items in order_items_by_order.items():
+        m = margin_by_order.get(order_id)
+        if not m:
+            continue
+        gross = float(m["gross_value"])
+        if gross == 0:
+            continue
+
+        for item in items:
+            pid = str(item.get("product_id", ""))
+            qty = int(item.get("quantity", 1))
+            unit_price = float(item.get("unit_price", 0))
+            proration = (unit_price * qty) / gross
+
+            if pid not in accumulated:
+                accumulated[pid] = {
+                    "product_id": pid,
+                    "units_sold": 0,
+                    "realized_revenue": 0.0,
+                    "contribution_margin": 0.0,
+                    "costs_incomplete": False,
+                }
+
+            accumulated[pid]["units_sold"] += qty
+            accumulated[pid]["realized_revenue"] += proration * float(m["realized_value"])
+            accumulated[pid]["contribution_margin"] += proration * float(m["contribution_margin"])
+            if not m["has_full_costs"]:
+                accumulated[pid]["costs_incomplete"] = True
+
+    result = [
+        {
+            "product_id":          data["product_id"],
+            "units_sold":          data["units_sold"],
+            "realized_revenue":    round(data["realized_revenue"], 2),
+            "contribution_margin": round(data["contribution_margin"], 2),
+            "costs_incomplete":    data["costs_incomplete"],
+        }
+        for data in accumulated.values()
+    ]
+    return sorted(result, key=lambda x: x["contribution_margin"])
+
+
 # ── DB-backed wrapper ─────────────────────────────────────────────────────────
 
 def fetch_daily_profit(brand_id: str, target_date: date, sb: Any) -> dict:
@@ -138,6 +199,7 @@ def fetch_daily_profit(brand_id: str, target_date: date, sb: Any) -> dict:
             "realized_revenue": 0, "total_cogs": 0, "total_spend": 0,
             "contribution_margin": 0, "net_profit": 0, "mer": None,
             "costs_incomplete": False, "orders_without_costs": [],
+            "product_margins": [],
         }
 
     order_ids = [o["order_id"] for o in order_rows]
@@ -181,4 +243,24 @@ def fetch_daily_profit(brand_id: str, target_date: date, sb: Any) -> dict:
         for o in order_rows
     ]
 
-    return calc_daily_summary(margins, ad_rows)
+    # Per-product margins
+    product_margins = calc_product_margins(margins, items_by_order)
+
+    # Enrich with human-readable product names from the raw catalog
+    prod_name_rows = (
+        sb.table("raw_shopify_products")
+        .select("product_id, payload")
+        .eq("brand_id", brand_id)
+        .in_("product_id", product_ids)
+        .execute()
+    ).data if product_ids else []
+    product_names = {
+        p["product_id"]: p["payload"].get("title", p["product_id"])
+        for p in prod_name_rows
+    }
+    for pm in product_margins:
+        pm["product_name"] = product_names.get(pm["product_id"], pm["product_id"])
+
+    summary = calc_daily_summary(margins, ad_rows)
+    summary["product_margins"] = product_margins
+    return summary

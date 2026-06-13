@@ -74,6 +74,33 @@ def compose_brief(
                 f"Freq {float(r.get('frequency') or 0):.1f}"
             )
 
+    # Product profitability (only when 5+ distinct products ordered that day)
+    pm = profit.get("product_margins", [])
+    if len(pm) >= 5:
+        lines.append("")
+        lines.append("Product margins (worst → best):")
+        bottom = pm[:3]
+        bottom_ids = {p["product_id"] for p in bottom}
+        top = [p for p in reversed(pm) if p["product_id"] not in bottom_ids][:3]
+        top_asc = list(reversed(top))   # ascending CM so worst-to-best reads top-to-bottom
+
+        for p in bottom:
+            name = (p.get("product_name") or p["product_id"])[:28]
+            units = f"{p['units_sold']} unit{'s' if p['units_sold'] != 1 else ''}"
+            note = "  *" if p["costs_incomplete"] else ""
+            lines.append(f"  {name:<28}  {units:<8}  CM {_inr(p['contribution_margin'])}{note}")
+
+        if top_asc:
+            lines.append("  ···")
+            for p in top_asc:
+                name = (p.get("product_name") or p["product_id"])[:28]
+                units = f"{p['units_sold']} unit{'s' if p['units_sold'] != 1 else ''}"
+                note = "  *" if p["costs_incomplete"] else ""
+                lines.append(f"  {name:<28}  {units:<8}  CM {_inr(p['contribution_margin'])}{note}")
+
+        if any(p["costs_incomplete"] for p in pm):
+            lines.append("  * costs incomplete for this product")
+
     # Fatigue flags
     if flags:
         lines.append("")
