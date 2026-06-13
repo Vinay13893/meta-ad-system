@@ -9,13 +9,16 @@ import requests
 from connectors.base import EcommerceConnector, OrderRecord
 
 API_VERSION = "2025-01"
-COD_KEYWORDS = {"cod", "cash", "manual"}
+
+# Exact gateway name returned by GoKwik for cash-on-delivery orders.
+# payment_gateway is always null in this store; payment_gateway_names is the real field.
+COD_GATEWAY_NAMES = {"cash_on_delivery"}
 
 
-def _is_cod(gateway: str | None) -> bool:
-    if not gateway:
+def _is_cod(gateway_names: list | None) -> bool:
+    if not gateway_names:
         return False
-    return any(kw in gateway.lower() for kw in COD_KEYWORDS)
+    return any(n.lower() in COD_GATEWAY_NAMES for n in gateway_names)
 
 
 def _derive_status(order: dict) -> str:
@@ -91,7 +94,7 @@ def fetch_raw_products(token: str, domain: str) -> list[dict]:
 
 def raw_to_order_record(raw: dict) -> OrderRecord:
     """Converts one raw Shopify order dict to an OrderRecord."""
-    gateway = raw.get("payment_gateway") or ""
+    gateway_names = raw.get("payment_gateway_names") or []
     items = [
         {
             "product_id": str(li.get("product_id") or li.get("variant_id") or "unknown"),
@@ -104,7 +107,7 @@ def raw_to_order_record(raw: dict) -> OrderRecord:
         order_id=str(raw["id"]),
         created_at=raw["created_at"],
         gross_value=float(raw.get("subtotal_price") or raw.get("total_price", 0)),
-        payment_method="cod" if _is_cod(gateway) else "prepaid",
+        payment_method="cod" if _is_cod(gateway_names) else "prepaid",
         status=_derive_status(raw),
         items=items,
     )

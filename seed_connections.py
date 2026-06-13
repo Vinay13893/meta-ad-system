@@ -1,26 +1,30 @@
 # Inserts the Meta and Shopify credentials into the connections table.
-# Run once after apply_migrations.py.
-# Safe to re-run — uses upsert.
+# Run once after applying migrations, or any time you rotate a token.
+# Safe to re-run — uses upsert keyed on (brand_id, platform, account_id).
+#
+# Uses the same supabase-py + SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY
+# variables as the rest of the pipeline. No DATABASE_URL needed.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 
-import psycopg2
 from dotenv import load_dotenv
+from supabase import create_client
 
 load_dotenv()
 
-DATABASE_URL          = os.environ.get("DATABASE_URL")
-META_ACCESS_TOKEN     = os.environ.get("META_ACCESS_TOKEN")
-META_AD_ACCOUNT_ID    = os.environ.get("META_AD_ACCOUNT_ID")
-SHOPIFY_SHOP_DOMAIN   = os.environ.get("SHOPIFY_SHOP_DOMAIN")
-SHOPIFY_ADMIN_TOKEN   = os.environ.get("SHOPIFY_ADMIN_TOKEN")
+SUPABASE_URL              = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+META_ACCESS_TOKEN         = os.environ.get("META_ACCESS_TOKEN")
+META_AD_ACCOUNT_ID        = os.environ.get("META_AD_ACCOUNT_ID")
+SHOPIFY_SHOP_DOMAIN       = os.environ.get("SHOPIFY_SHOP_DOMAIN")
+SHOPIFY_ADMIN_TOKEN       = os.environ.get("SHOPIFY_ADMIN_TOKEN", "").strip("'")
 
 missing = [k for k, v in {
-    "DATABASE_URL": DATABASE_URL,
+    "SUPABASE_URL": SUPABASE_URL,
+    "SUPABASE_SERVICE_ROLE_KEY": SUPABASE_SERVICE_ROLE_KEY,
     "META_ACCESS_TOKEN": META_ACCESS_TOKEN,
     "META_AD_ACCOUNT_ID": META_AD_ACCOUNT_ID,
     "SHOPIFY_SHOP_DOMAIN": SHOPIFY_SHOP_DOMAIN,
@@ -31,41 +35,33 @@ if missing:
     print(f"Missing in .env: {', '.join(missing)}")
     sys.exit(1)
 
-conn = psycopg2.connect(DATABASE_URL)
-conn.autocommit = True
-cur = conn.cursor()
+sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# Get the brand id
-cur.execute("select id from brands where name = 'Sage Royal Ayurveda' limit 1")
-row = cur.fetchone()
-if not row:
-    print("Brand not found — run apply_migrations.py first")
+brand = sb.table("brands").select("id").single().execute().data
+if not brand:
+    print("Brand not found — apply migrations first (Supabase Dashboard → SQL Editor)")
     sys.exit(1)
-brand_id = row[0]
+brand_id = brand["id"]
 
 connections = [
     {
-        "platform":   "meta",
-        "account_id": META_AD_ACCOUNT_ID,
+        "brand_id":    brand_id,
+        "platform":    "meta",
+        "account_id":  META_AD_ACCOUNT_ID,
         "credentials": {"access_token": META_ACCESS_TOKEN},
+        "status":      "active",
     },
     {
-        "platform":   "shopify",
-        "account_id": SHOPIFY_SHOP_DOMAIN,
+        "brand_id":    brand_id,
+        "platform":    "shopify",
+        "account_id":  SHOPIFY_SHOP_DOMAIN,
         "credentials": {"admin_token": SHOPIFY_ADMIN_TOKEN},
+        "status":      "active",
     },
 ]
 
 for c in connections:
-    cur.execute("""
-        insert into connections (brand_id, platform, account_id, credentials)
-        values (%s, %s, %s, %s)
-        on conflict (brand_id, platform, account_id)
-        do update set credentials = excluded.credentials,
-                      status = 'active'
-    """, (brand_id, c["platform"], c["account_id"], json.dumps(c["credentials"])))
+    sb.table("connections").upsert(c, on_conflict="brand_id,platform,account_id").execute()
     print(f"Upserted {c['platform']} connection for account {c['account_id']}")
 
-cur.close()
-conn.close()
 print("\nConnections seeded. Database is ready.")

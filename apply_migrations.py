@@ -1,6 +1,13 @@
 # Applies all SQL files in /migrations in order against the Supabase dev DB.
-# Run once after creating the Supabase project.
+# Run once when setting up a new Supabase project.
 # Safe to re-run — all statements use IF NOT EXISTS / ON CONFLICT DO NOTHING.
+#
+# This is the ONE file in the project that uses psycopg2 + DATABASE_URL.
+# Reason: supabase-py goes through PostgREST and cannot execute raw DDL.
+# Everything else in the pipeline uses SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
+#
+# Simpler alternative: paste each migrations/*.sql file into
+# Supabase Dashboard → SQL Editor and run it there.
 #
 # Requires: pip install psycopg2-binary python-dotenv
 

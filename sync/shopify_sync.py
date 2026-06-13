@@ -7,11 +7,22 @@ from supabase import Client
 from connectors.shopify import fetch_raw_orders, fetch_raw_products, raw_to_order_record
 
 
+def _is_influencer_order(raw: dict) -> bool:
+    """
+    Returns True for internal influencer/gifting orders that are marketing
+    expense, not revenue. These are created manually by the team with the
+    'influencer' tag and should not flow into profit calculations.
+    """
+    tags = [t.strip().lower() for t in (raw.get("tags") or "").split(",")]
+    return "influencer" in tags
+
+
 def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date, sb: Client) -> int:
     """
     Fetches Shopify orders for target_date, writes raw to raw_shopify_orders,
     and upserts normalized rows to orders + order_items.
-    Returns number of orders synced.
+    Influencer/gifting orders are stored raw but excluded from normalized tables.
+    Returns number of revenue orders synced.
     """
     token = creds["admin_token"]
     raw_orders = fetch_raw_orders(token, domain, target_date, target_date)
@@ -20,7 +31,7 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
         print(f"  Shopify: no orders for {target_date}")
         return 0
 
-    # 1 — store raw (immutable, keyed by order_id)
+    # 1 — store raw (immutable, ALL orders including influencer)
     raw_upserts = [
         {
             "brand_id": brand_id,
@@ -31,8 +42,13 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
     ]
     sb.table("raw_shopify_orders").upsert(raw_upserts, on_conflict="brand_id,order_id").execute()
 
-    # 2 — normalize orders
-    records = [raw_to_order_record(o) for o in raw_orders]
+    # 2 — normalize only revenue orders (exclude influencer/gifting)
+    revenue_orders = [o for o in raw_orders if not _is_influencer_order(o)]
+    skipped = len(raw_orders) - len(revenue_orders)
+    if skipped:
+        print(f"  Shopify: skipped {skipped} influencer order(s)")
+
+    records = [raw_to_order_record(o) for o in revenue_orders]
 
     order_rows = [
         {
@@ -75,7 +91,7 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
     if item_rows:
         sb.table("order_items").upsert(item_rows, on_conflict="brand_id,order_id,product_id").execute()
 
-    print(f"  Shopify: synced {len(records)} orders for {target_date}")
+    print(f"  Shopify: synced {len(records)} revenue orders for {target_date}")
     return len(records)
 
 

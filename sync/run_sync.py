@@ -51,8 +51,9 @@ def run(target_date: date | None = None) -> None:
         domain   = conn["account_id"]
         creds    = conn["credentials"]
         print(f"[Shopify] brand={brand_id} shop={domain}")
-        run_shopify_sync(brand_id, creds, domain, target_date, sb)
+        # Products first so the variant→product_id map exists before order_items are written
         run_shopify_products_sync(brand_id, creds, domain, sb)
+        run_shopify_sync(brand_id, creds, domain, target_date, sb)
 
     print("\n=== Sync complete ===")
 
