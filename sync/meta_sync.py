@@ -56,7 +56,7 @@ def run_meta_sync(brand_id: str, creds: dict, account_id: str, target_date: date
             "frequency": rec.frequency,
             "purchases": rec.purchases,
             "revenue_rep": rec.revenue_rep,
-            "ctr": rec.clicks / rec.impressions if rec.impressions else None,
+            "ctr": rec.link_clicks / rec.impressions if (rec.link_clicks is not None and rec.impressions) else None,
             "cpm": (rec.spend / rec.impressions * 1000) if rec.impressions else None,
             "cpa": (rec.spend / rec.purchases) if rec.purchases else None,
         }

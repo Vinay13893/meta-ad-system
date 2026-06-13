@@ -18,6 +18,7 @@ class AdMetricRecord:
     spend: float
     impressions: int
     clicks: int
+    link_clicks: int | None
     reach: int | None
     frequency: float | None
     purchases: float

@@ -20,7 +20,7 @@ FIELDS = ",".join([
     "ad_id", "ad_name",
     "campaign_id", "campaign_name",
     "adset_id", "adset_name",
-    "spend", "impressions", "clicks",
+    "spend", "impressions", "clicks", "inline_link_clicks",
     "ctr", "cpm", "reach", "frequency",
     "actions", "action_values",
 ])
@@ -85,6 +85,7 @@ def raw_to_record(raw: dict) -> AdMetricRecord:
         spend=float(raw.get("spend", 0)),
         impressions=int(raw.get("impressions", 0)),
         clicks=int(raw.get("clicks", 0)),
+        link_clicks=int(raw["inline_link_clicks"]) if raw.get("inline_link_clicks") else None,
         reach=int(raw["reach"]) if raw.get("reach") else None,
         frequency=float(raw["frequency"]) if raw.get("frequency") else None,
         purchases=_extract_action_value(raw.get("actions"), "purchase"),
