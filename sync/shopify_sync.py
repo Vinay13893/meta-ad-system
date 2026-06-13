@@ -50,6 +50,10 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
 
     records = [raw_to_order_record(o) for o in revenue_orders]
 
+    if not records:
+        print(f"  Shopify: no revenue orders for {target_date}")
+        return 0
+
     order_rows = [
         {
             "brand_id": brand_id,
