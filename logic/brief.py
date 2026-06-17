@@ -116,7 +116,13 @@ def compose_brief(
     return "\n".join(lines)
 
 
-def run_brief(brand_id: str, target_date: date, sb: Any) -> str:
+def run_brief(
+    brand_id: str,
+    target_date: date,
+    sb: Any,
+    *,
+    org_id: str | None = None,
+) -> str:
     """
     Fetches all data, composes brief, saves to daily_brief_log, returns text.
     """
@@ -135,9 +141,10 @@ def run_brief(brand_id: str, target_date: date, sb: Any) -> str:
 
     # Persist to daily_brief_log
     payload = {
-        "brand_id": brand_id,
-        "date":     str(target_date),
-        "summary":  json.dumps({
+        "brand_id":        brand_id,
+        "organization_id": org_id,
+        "date":            str(target_date),
+        "summary":         json.dumps({
             "profit": profit,
             "flags":  flags,
             "brief_text": text,

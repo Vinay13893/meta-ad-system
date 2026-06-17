@@ -17,7 +17,15 @@ def _is_influencer_order(raw: dict) -> bool:
     return "influencer" in tags
 
 
-def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date, sb: Client) -> int:
+def run_shopify_sync(
+    brand_id: str,
+    creds: dict,
+    domain: str,
+    target_date: date,
+    sb: Client,
+    *,
+    org_id: str | None = None,
+) -> int:
     """
     Fetches Shopify orders for target_date, writes raw to raw_shopify_orders,
     and upserts normalized rows to orders + order_items.
@@ -34,9 +42,10 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
     # 1 — store raw (immutable, ALL orders including influencer)
     raw_upserts = [
         {
-            "brand_id": brand_id,
-            "order_id": str(o["id"]),
-            "payload": o,
+            "brand_id":       brand_id,
+            "organization_id": org_id,
+            "order_id":       str(o["id"]),
+            "payload":        o,
         }
         for o in raw_orders
     ]
@@ -56,14 +65,15 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
 
     order_rows = [
         {
-            "brand_id":       brand_id,
-            "order_id":       rec.order_id,
-            "created_at":     rec.created_at,
-            "gross_value":    rec.gross_value,
-            "payment_method": rec.payment_method,
-            "status":         rec.status,
-            "meta_adset_id":  rec.meta_adset_id,
-            "meta_ad_name":   rec.meta_ad_name,
+            "brand_id":        brand_id,
+            "organization_id": org_id,
+            "order_id":        rec.order_id,
+            "created_at":      rec.created_at,
+            "gross_value":     rec.gross_value,
+            "payment_method":  rec.payment_method,
+            "status":          rec.status,
+            "meta_adset_id":   rec.meta_adset_id,
+            "meta_ad_name":    rec.meta_ad_name,
         }
         for rec in records
     ]
@@ -85,11 +95,12 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
     # 3 — normalize order items (resolve variant IDs to parent product IDs)
     item_rows = [
         {
-            "brand_id": brand_id,
-            "order_id": rec.order_id,
-            "product_id": variant_to_product.get(item["product_id"], item["product_id"]),
-            "quantity": item["quantity"],
-            "unit_price": item["unit_price"],
+            "brand_id":        brand_id,
+            "organization_id": org_id,
+            "order_id":        rec.order_id,
+            "product_id":      variant_to_product.get(item["product_id"], item["product_id"]),
+            "quantity":        item["quantity"],
+            "unit_price":      item["unit_price"],
         }
         for rec in records
         for item in rec.items
@@ -135,7 +146,14 @@ def refresh_rto_rates(brand_id: str, sb: Client) -> None:
     )
 
 
-def run_shopify_products_sync(brand_id: str, creds: dict, domain: str, sb: Client) -> int:
+def run_shopify_products_sync(
+    brand_id: str,
+    creds: dict,
+    domain: str,
+    sb: Client,
+    *,
+    org_id: str | None = None,
+) -> int:
     """Syncs all products (full refresh — products don't have a date dimension)."""
     token = creds["admin_token"]
     raw_products = fetch_raw_products(token, domain)
@@ -146,9 +164,10 @@ def run_shopify_products_sync(brand_id: str, creds: dict, domain: str, sb: Clien
 
     upserts = [
         {
-            "brand_id": brand_id,
-            "product_id": str(p["id"]),
-            "payload": p,
+            "brand_id":        brand_id,
+            "organization_id": org_id,
+            "product_id":      str(p["id"]),
+            "payload":         p,
         }
         for p in raw_products
     ]

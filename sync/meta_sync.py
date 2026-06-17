@@ -8,7 +8,15 @@ from supabase import Client
 from connectors.meta import fetch_raw_insights, raw_to_record
 
 
-def run_meta_sync(brand_id: str, creds: dict, account_id: str, target_date: date, sb: Client) -> int:
+def run_meta_sync(
+    brand_id: str,
+    creds: dict,
+    account_id: str,
+    target_date: date,
+    sb: Client,
+    *,
+    org_id: str | None = None,
+) -> int:
     """
     Fetches Meta ad insights for target_date, writes raw rows to
     raw_meta_insights, and upserts normalized rows to ad_metrics_daily.
@@ -24,11 +32,12 @@ def run_meta_sync(brand_id: str, creds: dict, account_id: str, target_date: date
     # 1 — store raw (immutable)
     raw_upserts = [
         {
-            "brand_id": brand_id,
-            "date": str(target_date),
-            "level": "ad",
-            "object_id": row["ad_id"],
-            "payload": row,
+            "brand_id":        brand_id,
+            "organization_id": org_id,
+            "date":            str(target_date),
+            "level":           "ad",
+            "object_id":       row["ad_id"],
+            "payload":         row,
         }
         for row in raw_rows
         if row.get("ad_id")
@@ -42,25 +51,26 @@ def run_meta_sync(brand_id: str, creds: dict, account_id: str, target_date: date
     records = [raw_to_record(r) for r in raw_rows]
     normalized = [
         {
-            "brand_id": brand_id,
-            "platform": "meta",
-            "date": str(rec.date),
-            "campaign_id": rec.campaign_id,
-            "campaign_name": rec.campaign_name,
-            "adset_id": rec.adset_id,
-            "adset_name": rec.adset_name,
-            "ad_id": rec.ad_id,
-            "ad_name": rec.ad_name,
-            "spend": rec.spend,
-            "impressions": rec.impressions,
-            "clicks": rec.clicks,
-            "reach": rec.reach,
-            "frequency": rec.frequency,
-            "purchases": rec.purchases,
-            "revenue_rep": rec.revenue_rep,
-            "ctr": float(raw["ctr"]) if raw.get("ctr") else None,
-            "cpm": (rec.spend / rec.impressions * 1000) if rec.impressions else None,
-            "cpa": (rec.spend / rec.purchases) if rec.purchases else None,
+            "brand_id":        brand_id,
+            "organization_id": org_id,
+            "platform":        "meta",
+            "date":            str(rec.date),
+            "campaign_id":     rec.campaign_id,
+            "campaign_name":   rec.campaign_name,
+            "adset_id":        rec.adset_id,
+            "adset_name":      rec.adset_name,
+            "ad_id":           rec.ad_id,
+            "ad_name":         rec.ad_name,
+            "spend":           rec.spend,
+            "impressions":     rec.impressions,
+            "clicks":          rec.clicks,
+            "reach":           rec.reach,
+            "frequency":       rec.frequency,
+            "purchases":       rec.purchases,
+            "revenue_rep":     rec.revenue_rep,
+            "ctr":             float(raw["ctr"]) if raw.get("ctr") else None,
+            "cpm":             (rec.spend / rec.impressions * 1000) if rec.impressions else None,
+            "cpa":             (rec.spend / rec.purchases) if rec.purchases else None,
         }
         for rec, raw in zip(records, raw_rows)
         if rec.ad_id

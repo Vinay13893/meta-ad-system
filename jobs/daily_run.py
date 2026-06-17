@@ -18,7 +18,7 @@ from datetime import date, timedelta
 from dotenv import load_dotenv
 from supabase import create_client
 
-from sync.run_sync import run as run_sync
+from sync.run_sync import run as run_sync, get_organization_id
 from logic.brief import run_brief
 from jobs.notify import send_daily_brief
 
@@ -47,9 +47,10 @@ def main() -> None:
     sb = create_client(supabase_url, supabase_key)
     brand = sb.table("brands").select("id").single().execute().data
     brand_id = brand["id"]
+    org_id   = get_organization_id(brand_id, sb)
 
     print("\nGenerating brief...")
-    brief_text = run_brief(brand_id, target_date, sb)
+    brief_text = run_brief(brand_id, target_date, sb, org_id=org_id)
     print(brief_text)
 
     # 4 — send email

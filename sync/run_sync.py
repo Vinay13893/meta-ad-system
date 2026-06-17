@@ -26,6 +26,12 @@ def get_supabase():
     return create_client(url, key)
 
 
+def get_organization_id(brand_id: str, sb) -> str | None:
+    """Returns the organization_id for a brand, or None if not yet onboarded."""
+    result = sb.table("brands").select("organization_id").eq("id", brand_id).single().execute()
+    return result.data.get("organization_id") if result.data else None
+
+
 def run(target_date: date | None = None) -> None:
     if target_date is None:
         target_date = date.today() - timedelta(days=1)
@@ -43,17 +49,23 @@ def run(target_date: date | None = None) -> None:
         brand_id   = conn["brand_id"]
         account_id = conn["account_id"]
         creds      = conn["credentials"]
+        org_id     = get_organization_id(brand_id, sb)
+        if org_id is None:
+            print(f"  WARNING: brand {brand_id} has no organization_id — rows will be written with organization_id=NULL")
         print(f"[Meta] brand={brand_id} account={account_id}")
-        run_meta_sync(brand_id, creds, account_id, target_date, sb)
+        run_meta_sync(brand_id, creds, account_id, target_date, sb, org_id=org_id)
 
     for conn in shopify_conns:
         brand_id = conn["brand_id"]
         domain   = conn["account_id"]
         creds    = conn["credentials"]
+        org_id   = get_organization_id(brand_id, sb)
+        if org_id is None:
+            print(f"  WARNING: brand {brand_id} has no organization_id — rows will be written with organization_id=NULL")
         print(f"[Shopify] brand={brand_id} shop={domain}")
         # Products first so the variant→product_id map exists before order_items are written
-        run_shopify_products_sync(brand_id, creds, domain, sb)
-        run_shopify_sync(brand_id, creds, domain, target_date, sb)
+        run_shopify_products_sync(brand_id, creds, domain, sb, org_id=org_id)
+        run_shopify_sync(brand_id, creds, domain, target_date, sb, org_id=org_id)
         refresh_rto_rates(brand_id, sb)
 
     print("\n=== Sync complete ===")
