@@ -56,12 +56,14 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
 
     order_rows = [
         {
-            "brand_id": brand_id,
-            "order_id": rec.order_id,
-            "created_at": rec.created_at,
-            "gross_value": rec.gross_value,
+            "brand_id":       brand_id,
+            "order_id":       rec.order_id,
+            "created_at":     rec.created_at,
+            "gross_value":    rec.gross_value,
             "payment_method": rec.payment_method,
-            "status": rec.status,
+            "status":         rec.status,
+            "meta_adset_id":  rec.meta_adset_id,
+            "meta_ad_name":   rec.meta_ad_name,
         }
         for rec in records
     ]
@@ -97,6 +99,40 @@ def run_shopify_sync(brand_id: str, creds: dict, domain: str, target_date: date,
 
     print(f"  Shopify: synced {len(records)} revenue orders for {target_date}")
     return len(records)
+
+
+_MIN_COD_ORDERS_FOR_RATE = 30  # don't trust the rate until we have enough history
+
+
+def refresh_rto_rates(brand_id: str, sb: Client) -> None:
+    """
+    Computes the observed COD RTO rate from the orders table and updates
+    product_costs.cod_rto_rate for all products.
+    Requires at least _MIN_COD_ORDERS_FOR_RATE non-cancelled COD orders before
+    moving off 0.0, to avoid noise from tiny samples.
+    """
+    cod_rows = (
+        sb.table("orders")
+        .select("status")
+        .eq("brand_id", brand_id)
+        .eq("payment_method", "cod")
+        .neq("status", "cancelled")
+        .execute()
+    ).data
+
+    if len(cod_rows) < _MIN_COD_ORDERS_FOR_RATE:
+        print(
+            f"  RTO rate: {len(cod_rows)} COD orders so far "
+            f"(need {_MIN_COD_ORDERS_FOR_RATE}) — keeping rate at 0.0"
+        )
+        return
+
+    rto_count = sum(1 for r in cod_rows if r["status"] == "rto")
+    rate = round(rto_count / len(cod_rows), 4)
+    sb.table("product_costs").update({"cod_rto_rate": rate}).eq("brand_id", brand_id).execute()
+    print(
+        f"  RTO rate: {rto_count}/{len(cod_rows)} COD orders = {rate:.1%} → updated product_costs"
+    )
 
 
 def run_shopify_products_sync(brand_id: str, creds: dict, domain: str, sb: Client) -> int:

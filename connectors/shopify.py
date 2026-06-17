@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from datetime import date
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -21,9 +22,45 @@ def _is_cod(gateway_names: list | None) -> bool:
     return any(n.lower() in COD_GATEWAY_NAMES for n in gateway_names)
 
 
+def _extract_utm(raw: dict) -> tuple[str | None, str | None]:
+    """
+    Returns (meta_adset_id, meta_ad_name) from a raw Shopify order.
+
+    Checks two locations in order:
+    1. landing_site URL query params (standard Shopify checkout path)
+    2. note_attributes key-value list (GoKwik and other headless checkouts)
+
+    Both meta_adset_id (utm_term) and meta_ad_name (utm_content) are only
+    populated when utm_source == "fb". Returns (None, None) otherwise.
+    """
+    utms: dict[str, str] = {}
+
+    landing = raw.get("landing_site") or ""
+    if landing:
+        try:
+            qs = parse_qs(urlparse(landing).query)
+            utms = {k.lower(): v[0] for k, v in qs.items()}
+        except Exception:
+            pass
+
+    if not utms.get("utm_source"):
+        for attr in raw.get("note_attributes") or []:
+            name = (attr.get("name") or "").lower()
+            if name.startswith("utm_"):
+                utms[name] = attr.get("value") or ""
+
+    if utms.get("utm_source", "").lower() != "fb":
+        return None, None
+
+    return utms.get("utm_term") or None, utms.get("utm_content") or None
+
+
 def _derive_status(order: dict) -> str:
     if order.get("cancelled_at"):
         return "cancelled"
+    tags = [t.strip().lower() for t in (order.get("tags") or "").split(",")]
+    if "rto" in tags:
+        return "rto"
     fulfil = order.get("fulfillment_status") or "unfulfilled"
     financial = order.get("financial_status", "")
     if fulfil == "fulfilled" and financial in ("paid", "partially_refunded"):
@@ -103,6 +140,7 @@ def raw_to_order_record(raw: dict) -> OrderRecord:
         }
         for li in raw.get("line_items", [])
     ]
+    meta_adset_id, meta_ad_name = _extract_utm(raw)
     return OrderRecord(
         order_id=str(raw["id"]),
         created_at=raw["created_at"],
@@ -110,6 +148,8 @@ def raw_to_order_record(raw: dict) -> OrderRecord:
         payment_method="cod" if _is_cod(gateway_names) else "prepaid",
         status=_derive_status(raw),
         items=items,
+        meta_adset_id=meta_adset_id,
+        meta_ad_name=meta_ad_name,
     )
 
 

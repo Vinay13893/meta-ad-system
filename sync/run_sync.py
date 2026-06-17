@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 from sync.meta_sync import run_meta_sync
-from sync.shopify_sync import run_shopify_sync, run_shopify_products_sync
+from sync.shopify_sync import run_shopify_sync, run_shopify_products_sync, refresh_rto_rates
 
 load_dotenv()
 
@@ -54,6 +54,7 @@ def run(target_date: date | None = None) -> None:
         # Products first so the variant→product_id map exists before order_items are written
         run_shopify_products_sync(brand_id, creds, domain, sb)
         run_shopify_sync(brand_id, creds, domain, target_date, sb)
+        refresh_rto_rates(brand_id, sb)
 
     print("\n=== Sync complete ===")
 

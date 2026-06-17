@@ -42,6 +42,8 @@ class OrderRecord:
     payment_method: str      # 'cod' | 'prepaid'
     status: str              # 'confirmed' | 'delivered' | 'cancelled' | 'returned'
     items: list[dict]        # [{product_id, quantity, unit_price}]
+    meta_adset_id: str | None = None   # utm_term when utm_source=fb
+    meta_ad_name: str | None = None    # utm_content when utm_source=fb
 
 
 class EcommerceConnector(ABC):
