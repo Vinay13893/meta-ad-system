@@ -311,6 +311,162 @@ CLAUDE.md           this file
 ## 10. Explicitly OUT OF SCOPE until told otherwise
 
 Do not build, even if it seems helpful: user auth/login, billing, OAuth connect
-flows, onboarding wizards, a web dashboard/frontend, row-level security,
-multi-brand UI, Google Ads. These belong to the SaaS phase. Building them now is
-wasted effort. When we reach the SaaS phase, this file will be updated first.
+flows, onboarding wizards, row-level security, multi-brand UI, Google Ads.
+These belong to the SaaS phase. Building them now is wasted effort. When we
+reach the SaaS phase, this file will be updated first.
+
+**Note on dashboard (revised from original "no dashboard" rule):** a minimal
+read-only viewer is now in scope, as a separate parallel track from the data
+pipeline (see §12). It starts simple (render existing tables) and grows a
+creative gallery once §12 lands. It is single-tenant, no auth, read-only —
+do not let it grow login/multi-brand/editing features without updating this
+file first.
+
+---
+
+## 11. Backlog / Deferred (do not forget these)
+
+These are real, scoped follow-ups — not abandoned ideas. Pick them up when
+their dependency is ready. Remove an item from this list only when it's been
+built or deliberately dropped (with a note why).
+
+- **Video retention metrics.** Meta's Insights API returns video-specific
+  metrics (25/50/75/95% watch-through, thruplay, avg watch time) at the ad
+  level. Join these into `creative_tags`/analysis once creative tagging
+  (§12) is producing data for long enough to find patterns. This is the
+  data source for "what creative format works for which campaign objective"
+  (awareness vs consideration vs conversion vs retargeting).
+- **Demo seed data time-drift (007_demo_seed.sql).** Order dates and
+  `ad_metrics_daily` dates are anchored to `now()` / `current_date` at the
+  time the seed script runs, not to a rolling window. As a result, the
+  dashboard's "last 30 days" filter shows progressively fewer rows each day
+  after the seed is run — and will show fully empty data ~30 days after the
+  last seed run (estimated fully empty: **~July 14–15, 2026** based on the
+  seed run of ~June 14–15, 2026). Two fix directions to consider:
+  - **(a) Periodic re-seed cron** — simplest: truncate demo data and re-run
+    `007_demo_seed.sql` on a schedule (e.g. weekly). Downside: `random()`
+    values change each run, producing inconsistent KPI numbers across
+    demos — bad for client/investor presentations where the audience may
+    see different numbers on different days.
+  - **(b) Deterministic rolling seed** — use `setseed()` (fixed seed value)
+    plus formula-based values derived from the loop index instead of
+    `random()`, and anchor dates to `now()` at run time. Re-running
+    produces identical KPI numbers every time, regardless of when it's run.
+    More work upfront, but produces a stable, presentable demo indefinitely.
+  **Recommendation:** if the dashboard is ever used for client or investor
+  demos where consistency matters, implement option (b). Option (a) is
+  acceptable for internal dev use only.
+- **Gifting/influencer order COGS as a marketing expense.** Influencer
+  orders are correctly excluded from `orders`/`order_items` (so they don't
+  inflate revenue), but the COGS of gifted product currently isn't counted
+  as a cost anywhere. Raw data is preserved in `raw_shopify_orders`. When
+  ready, add a lightweight `marketing_orders` view/table and fold gifting
+  COGS into the profit picture as a marketing line item.
+- **Publish creatives to Meta as ads (capstone capability — LAST).** Meta's
+  Marketing API supports creating ad creatives/ads/adsets/campaigns
+  programmatically via the same connector/token already in use
+  (`connectors/meta.py`), just write endpoints instead of read endpoints.
+  This is explicitly the LAST major capability to build, after creative
+  tagging (§12), RCA, alert prioritization, and budget-allocation logic are
+  all built AND validated against real outcomes — publishing without that
+  context is just "upload a video," not the intelligent placement that makes
+  it valuable.
+
+  **MANDATORY SAFETY RULE, not negotiable by convenience or user request at
+  build time:** any ad/adset/campaign created by this system via the API
+  MUST be created in `PAUSED` status. The system NEVER activates an ad. A
+  human reviews, edits anything they disagree with, and activates manually
+  in Ads Manager or via an explicit separate human action. If a future
+  prompt asks to "auto-activate" or "go live automatically," that is a
+  scope change to this file requiring explicit, deliberate sign-off — flag
+  it rather than building it.
+
+---
+
+## 12. Creative Intelligence module (in progress)
+
+### 12.1 Purpose
+Automated creative analysis: classify uploaded video/image creatives against
+an evolving taxonomy (content type, structure, hook type), extract ad copy,
+and — once enough tagged data + performance data exists (see §11) — surface
+which creative patterns work best per campaign objective.
+
+### 12.2 Taxonomy is DATA, not an enum
+The taxonomy (content_type, structure, hook_type, objective values) WILL
+change over time as new creative formats emerge. Do not hardcode as a SQL
+enum or Python Literal/Enum that requires a migration or code change to add
+a value. Store as free text. A simple reference list can live in a config
+file or table for documentation/autocomplete, but must not constrain inserts.
+
+Current working taxonomy (expect this to grow):
+- content_type: ugc, talking_head, founder_led, broll_voiceover, educational,
+  studio_product_demo, meme_text, animation
+- structure: hook_problem_solution, hook_story_cta, testimonial,
+  before_after, unboxing, comparison, listicle, direct_offer
+- hook_type: problem_first, curiosity_pattern_interrupt, bold_claim_stat,
+  question, relatable_scenario
+- objective (from the Meta campaign, not the creative itself): awareness,
+  consideration, conversion, retargeting
+
+### 12.3 Schema
+```sql
+-- One row per uploaded creative (video or image/carousel).
+create table creatives (
+  id            uuid primary key default gen_random_uuid(),
+  brand_id      uuid not null references brands(id),
+  file_url      text not null,        -- Supabase Storage URL
+  file_type     text not null,        -- 'video' | 'image' | 'carousel'
+  ad_id         text,                 -- nullable; manual mapping to a live
+                                       -- Meta ad_id, filled in when known
+  uploaded_at   timestamptz not null default now()
+);
+
+-- Tags/analysis for a creative. One row per creative (re-run = update).
+create table creative_tags (
+  creative_id   uuid primary key references creatives(id),
+  brand_id      uuid not null references brands(id),
+  content_type  text,                 -- free text, see §12.2
+  structure     text,
+  hook_type     text,
+  objective     text,
+  description   text,                 -- short free-text visual description
+  hook_text     text,                 -- transcribed/extracted hook or headline
+  offer_cta     text,
+  source        text not null,        -- 'manual' | 'ai:<model_name>'
+  notes         text,
+  tagged_at     timestamptz not null default now()
+);
+```
+`source` lets manual ground-truth tags and AI-generated tags coexist and be
+compared (e.g. `source='manual'` vs `source='ai:gpt-4o'` for the same
+creative, before deciding to trust the AI tags as primary).
+
+### 12.4 Analyzer interface (pluggable, like connectors)
+```python
+# analysis/base.py
+from dataclasses import dataclass
+
+@dataclass
+class CreativeTags:
+    content_type: str | None
+    structure: str | None
+    hook_type: str | None
+    description: str | None
+    hook_text: str | None
+    offer_cta: str | None
+
+class CreativeAnalyzer:
+    """One implementation per AI provider (OpenAI, Anthropic, etc.)."""
+    def analyze(self, file_url: str, file_type: str, taxonomy: dict) -> CreativeTags: ...
+```
+Concrete modules: `analysis/openai_analyzer.py`, etc. Swappable so different
+providers/models can be compared against manual ground-truth tags before
+picking a default.
+
+### 12.5 Sequencing notes
+1. Schema + Supabase Storage upload (plumbing, no AI) — current step.
+2. Manual tagging of ~10-15 creatives as ground truth (`source='manual'`).
+3. First AI analyzer implementation, run on the same creatives, compared
+   against manual tags before trusting it on the full library.
+4. Dashboard gallery (§10) reads from `creatives` + `creative_tags`.
+5. §11 retention-metrics join, once enough tagged + performance data exists.
